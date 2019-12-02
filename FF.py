@@ -480,7 +480,101 @@ jfttbar = jetFakeEstimation("2016", "mt", "ttbar")
 lastvals = {}
 
 
-class fakefactor(object):
+class DynBins(object):
+    def __init__(self, slarr, blarr, predictionVars):
+        self.slarr = slarr
+        self.blarr = blarr
+        self.predictionVars = predictionVars
+        ### histogram both regions in the generated bins
+        ### use dynamic binning, from the bl region -> no 1/0 bins
+        self.binbordersD = {
+            var: self.dynbins(self.blarr[var], self.blarr["eventWeight"])
+            for var in predictionVars
+        }
+        self.blh, self.edges = np.histogramdd(
+            [self.blarr[var] for var in self.predictionVars],
+            weights=self.blarr["eventWeight"],
+            bins=np.array(
+                [self.binbordersD[var] for var in self.predictionVars]))
+        self.slh, _ = np.histogramdd(
+            [self.slarr[var] for var in self.predictionVars],
+            weights=self.slarr["eventWeight"],
+            bins=np.array(
+                [self.binbordersD[var] for var in self.predictionVars]))
+        self.bincentersL = [
+            self.binbordersToCenters(self.binbordersD[var])
+            for var in self.predictionVars
+        ]
+        print(self.slh.sum())
+
+        ## currently, the merge of the 1d bins into a nbinning lev
+        ## join bins  a var that do not have sufficient statistic due to the "multiplication" of the 1d binnings
+        ## the binning should be reduced in the variable with most bins first:
+        predictionVarsByLengthL = list(
+            enumerate(copy.deepcopy(self.predictionVars)))
+        predictionVarsByLengthL.sort(key=lambda k: len(self.binbordersD[k[1]]),
+                                     reverse=True)
+        print(predictionVarsByLengthL)
+        print(self.predictionVars)
+        for ivar, var in predictionVarsByLengthL:
+            bb = self.binbordersD[var]
+            bc = self.bincentersL[ivar]
+            ibin = len(bc) - 1
+            while (ibin >= 1):
+                slplane = self.slh.take(indices=ibin, axis=ivar)
+                blplane = self.blh.take(indices=ibin, axis=ivar)
+                ### continue joining bins of the selected variables as long as 50% of the events at the selected index dont have enough events
+                while (any([
+                        np.sum(plane < 10.) > 0.5 * len(plane)
+                        for plane in (slplane, blplane)
+                ])):
+                    print(
+                        "for variable {} deleting merging bin {} with previous bin"
+                        .format(var, ibin))
+                    ##  the new 'row' is the element wise sum of the already existing row + the new one
+                    self.slh = self.replaceWithSumToPreviousIndex(
+                        self.slh, ivar, ibin)
+                    self.blh = self.replaceWithSumToPreviousIndex(
+                        self.blh, ivar, ibin)
+                    # set the upper bin border to the next bin
+                    bc[ibin - 1] = bb[ibin]
+
+                    ## hopefully this does del bc[ibin], bb[ibin]
+                    bc = np.delete(bc, ibin)
+                    bc = np.delete(bb, ibin)
+                    ### count bin down
+                    ibin -= 1
+                    ### set the planes again, so the while can check them again
+                    slplane = self.slh.take(indices=ibin, axis=ivar)
+                    blplane = self.blh.take(indices=ibin, axis=ivar)
+                ibin -= 1
+        ## generate a list of index tuples for slh, blh
+        # self.idxs = [
+        #     tuple(x) for x in itertools.product(
+        #         *[list(range(len(l))) for l in self.bincentersL])
+        # ]
+        ## filter indices of bins with less than 10 events
+        self.idxs = list(np.ndindex(*self.slh.shape))
+        self.valididxs = [
+            idx for idx in self.idxs if self.slh[idx] > 5 and self.blh[idx] > 5
+        ]
+        print(self.slh.sum())
+        ## select the bins with mor then 10 events in signal and bkg region as x values for our regression
+        self.xv = np.array(list(
+            itertools.product(*np.array(self.bincentersL))))[self.valididxs]
+        self.yv = np.array(
+            map(lambda idx: self.slh[idx] / self.blh[idx], self.valididxs))
+        self.ymat = np.full(self.slh.shape, np.nan)
+        for idx, y in zip(self.valididxs, self.yv):
+            self.ymat[idx] = y
+        import seaborn as sns
+        sns.heatmap(self.ymat)
+
+        # # x values for the fit
+        # self.xsc = np.arange(
+        #     self.binborders[0], self.binborders[-1] + 200,
+        #     200. / np.abs(self.binborders[-1] - self.binborders[0]))
+
     def dynbins(self, arr, weightsarr):
         import numpy.lib.recfunctions as rfn
         # if weights == None:
@@ -534,6 +628,24 @@ class fakefactor(object):
         ])
         return yerror
 
+    ## return a tuple indexing the axis , to with naxis=3, axis=1, fix=3
+    ## this returns (:,3,:)
+    def getIndexTuple(self, naxis, axis, fix):
+        return (tuple([[slice(None), fix][axi == axis]
+                       for axi in range(naxis)]))
+
+    ### takes and array, the selected axis and an index
+    ### replaces the values along that axis for index idx-1 with the sum of values along this axis with index idx-1 and idx
+    ###
+    def replaceWithSumToPreviousIndex(self, arr, ivar, idx):
+        plane = arr.take(indices=idx, axis=ivar) + arr.take(indices=idx - 1,
+                                                            axis=ivar)
+        s = self.getIndexTuple(len(arr.shape), axis=ivar, fix=idx - 1)
+        arr[s] = plane
+        return (np.delete(arr, obj=idx, axis=ivar))
+
+
+class fakefactor(object):
     def __init__(self, jfRS, filterstring, predictionVars):
         ## get the numpy arrays from the jfObject
         self.jfRS = jfRS
@@ -545,11 +657,9 @@ class fakefactor(object):
         self.slarr = jfRS.DR_sl.RDF.Filter(filterstring).AsNumpy(
             predictionVars + ["eventWeight"])
 
-        ### use dynamic binning, from the bl region -> no 1/0 bins
-        self.binbordersD = {
-            var: self.dynbins(self.blarr[var], self.blarr["eventWeight"])
-            for var in predictionVars
-        }
+        binningObj = DynBins(self.slarr, self.blarr, self.predictionVars)
+        self.slh=binningObj.slh
+        self.blh=binningObj.blh
         ### borders for comparing the old fakefaktors
 
         # if jfRS.meta["bkg"]=="QCD":
@@ -557,7 +667,6 @@ class fakefactor(object):
         # #elif jfRS.meta["bkg"]=="W+jets": self.binborders=np.array([29,32.5,36,42,65,500], np.float32)
         # else: raise Exception
 
-        self.setupHist()
         #self.applyCorrections()
         # self.yerror = self.calcyerror()
         # self.npars, self.pars = self.getFitPars()
@@ -580,76 +689,6 @@ class fakefactor(object):
         # self.fitresy = self.fitfunction(self.xsc, *popt)
         # self.rooFitPercV = self.roofitError()
         # self.plotFF()
-
-    def calcHistograms(self):
-        ### histogram both regions in the generated bins
-        self.blh, self.edges = np.histogramdd(
-            [self.blarr[var] for var in self.predictionVars],
-            weights=self.blarr["eventWeight"],
-            bins=np.array(
-                [self.binbordersD[var] for var in self.predictionVars]))
-        self.slh, _ = np.histogramdd(
-            [self.slarr[var] for var in self.predictionVars],
-            weights=self.slarr["eventWeight"],
-            bins=np.array(
-                [self.binbordersD[var] for var in self.predictionVars]))
-        self.bincentersL = [
-            self.binbordersToCenters(self.binbordersD[var])
-            for var in self.predictionVars
-        ]
-
-    def setupHist(self):
-        self.calcHistograms()
-        ## generate a list of index tuples for slh, blh
-        # self.idxs = [
-        #     tuple(x) for x in itertools.product(
-        #         *[list(range(len(l))) for l in self.bincentersL])
-        # ]
-        self.idxs = list(np.ndindex(*self.slh.shape))
-
-        ## currently, the merge of the 1d bins into a nbinning lev
-        ## join bins  a var that do not have sufficient statistic due to the "multiplication" of the 1d binnings
-        for ivar, var in enumerate(self.predictionVars):
-            bb = self.binbordersD[var]
-            bc = self.bincentersL[ivar]
-            ibin = len(bc) - 1
-            while (ibin >= 1):
-                slplane = self.slh.take(indices=ibin, axis=ivar)
-                blplane = self.blh.take(indices=ibin, axis=ivar)
-                ### continui joining bins of the selected variables as long as 50% of the events at the selected index dont have enough events
-                while (any([
-                        np.sum(plane < 10.) > 0.5 * len(plane)
-                        for plane in (slplane, blplane)
-                ])):
-                    slplane = slplane + self.slh.take(indices=ibin, axis=ivar)
-                    self.slh.put_along_axis(indices=ibin,
-                                            axis=ivar,
-                                            values=slplane)
-                    blplane = blplane + self.blh.take(indices=ibin, axis=ivar)
-                    self.blh.put_along_axis(indices=ibin,
-                                            axis=ivar,
-                                            values=blplane)
-                    bc[ibin - 1] = bb[ibin]
-                    del bc[ibin], bb[ibin]
-                ibin -= 1
-        ## filter indices of bins with less than 10 events
-        self.valididxs = [
-            idx for idx in self.idxs if self.slh[idx] > 5 and self.blh[idx] > 5
-        ]
-
-        ## select the bins with mor then 10 events in signal and bkg region as x values for our regression
-        self.xv = np.array(list(
-            itertools.product(*np.array(self.bincentersL))))[self.valididxs]
-        self.yv = np.array(
-            map(lambda idx: self.slh[idx] / self.blh[idx], a.valididxs))
-        self.ymat = np.full(self.slh.shape, np.nan)
-        for idx, y in zip(self.valididxs, self.yv):
-            self.ymat[idx] = y
-
-        # # x values for the fit
-        # self.xsc = np.arange(
-        #     self.binborders[0], self.binborders[-1] + 200,
-        #     200. / np.abs(self.binborders[-1] - self.binborders[0]))
 
     def getFitPars(self):
         center = np.mean(self.binborders)
