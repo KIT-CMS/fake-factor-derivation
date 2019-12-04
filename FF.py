@@ -233,7 +233,7 @@ class jetFakeEstimation(object):
         #     self.fakeWeightstring="(0.5*ffcutDB(channelName,cutName,bkgName,signalLikeRegion, eraName="2017")1_nom*(byTightIsolationMVArun2017v2DBoldDMwLT2017_1<0.5)+0.5*ff2_nom*(byTightIsolationMVArun2017v2DBoldDMwLT2017_2<0.5))"
 
         self.CutString = self.channel.cuts.expand()
-        print self.CutString
+        logger.debug(self.CutString)
         self.estimation = DataEstimation(
             era=eraD[eraName],
             directory="/ceph/htautau/" + eraName + "/ntuples/",
@@ -506,6 +506,7 @@ class DynBins(object):
             for var in self.predictionVars
         ]
         print(self.slh.sum())
+        print(self.blh.sum())
 
         ## currently, the merge of the 1d bins into a nbinning lev
         ## join bins  a var that do not have sufficient statistic due to the "multiplication" of the 1d binnings
@@ -514,8 +515,6 @@ class DynBins(object):
             enumerate(copy.deepcopy(self.predictionVars)))
         predictionVarsByLengthL.sort(key=lambda k: len(self.binbordersD[k[1]]),
                                      reverse=True)
-        print(predictionVarsByLengthL)
-        print(self.predictionVars)
         for ivar, var in predictionVarsByLengthL:
             bb = self.binbordersD[var]
             bc = self.bincentersL[ivar]
@@ -528,7 +527,7 @@ class DynBins(object):
                         np.sum(plane < 10.) > 0.5 * len(plane)
                         for plane in (slplane, blplane)
                 ])):
-                    print(
+                    logger.debug(
                         "for variable {} deleting merging bin {} with previous bin"
                         .format(var, ibin))
                     ##  the new 'row' is the element wise sum of the already existing row + the new one
@@ -548,27 +547,44 @@ class DynBins(object):
                     slplane = self.slh.take(indices=ibin, axis=ivar)
                     blplane = self.blh.take(indices=ibin, axis=ivar)
                 ibin -= 1
-        ## generate a list of index tuples for slh, blh
-        # self.idxs = [
-        #     tuple(x) for x in itertools.product(
-        #         *[list(range(len(l))) for l in self.bincentersL])
-        # ]
+
+        print(self.slh.sum())
+        print(self.blh.sum())
         ## filter indices of bins with less than 10 events
+        ## generate a list of index tuples for slh, blh
         self.idxs = list(np.ndindex(*self.slh.shape))
         self.valididxs = [
             idx for idx in self.idxs if self.slh[idx] > 5 and self.blh[idx] > 5
         ]
-        print(self.slh.sum())
         ## select the bins with mor then 10 events in signal and bkg region as x values for our regression
         self.xv = np.array(list(
             itertools.product(*np.array(self.bincentersL))))[self.valididxs]
         self.yv = np.array(
             map(lambda idx: self.slh[idx] / self.blh[idx], self.valididxs))
+        self.plotyMat()
+    def plotyMat(self):
         self.ymat = np.full(self.slh.shape, np.nan)
         for idx, y in zip(self.valididxs, self.yv):
             self.ymat[idx] = y
         import seaborn as sns
-        sns.heatmap(self.ymat)
+        import matplotlib.pyplot as plt
+        plt.close()
+        plt.cla()
+        plt.clf()
+        fit, axes = plt.subplots(3,1)
+        plt.gcf().set_size_inches((6, 8))
+
+        g=sns.heatmap(self.ymat, ax=axes[0])
+        g.set_xticklabels(self.bincentersL[0].round(0))
+        g.set_yticklabels(self.bincentersL[1].round(0))
+        g=sns.heatmap(self.slh, ax=axes[1])
+        g.set_xticklabels(self.bincentersL[0].round(0))
+        g.set_yticklabels(self.bincentersL[1].round(0))
+        g=sns.heatmap(self.blh, ax=axes[2])
+        g.set_xticklabels(self.bincentersL[0].round(0))
+        g.set_yticklabels(self.bincentersL[1].round(0))
+        plt.show
+
 
         # # x values for the fit
         # self.xsc = np.arange(
@@ -614,20 +630,6 @@ class DynBins(object):
         return np.array([(arr[i] + arr[i + 1]) / 2.0
                          for i in range(len(arr) - 1)])
 
-    def calcyerror(self):
-        ### Error calculation
-        ## σ_y= abs(y)sqrt((∂_s y)^2*σ_s^2+(∂_b y)^2*σ_b^2+2(∂_s y)(∂_b y)σ_s^2*σ_b^2)
-        # y,s,b>0 y=s/b
-        # = y*sqrt((σ_s/s)^2+(σ_b/b)^2+σ_s*σ_b/(s*b))
-        # poisson error
-        # = y*sqrt(sqrt(1/s)^2+sqrt(1/b)^2-2*σ_sb/(s*b))
-        # = y*sqrt(sqrt(1/s)^2+sqrt(1/b)^2)
-        yerror = np.array([
-            self.yv[i] * np.sqrt(1 / self.slh[i] + 1 / self.blh[i])
-            for i in range(len(self.yv))
-        ])
-        return yerror
-
     ## return a tuple indexing the axis , to with naxis=3, axis=1, fix=3
     ## this returns (:,3,:)
     def getIndexTuple(self, naxis, axis, fix):
@@ -658,8 +660,10 @@ class fakefactor(object):
             predictionVars + ["eventWeight"])
 
         binningObj = DynBins(self.slarr, self.blarr, self.predictionVars)
-        self.slh=binningObj.slh
-        self.blh=binningObj.blh
+        self.slh = binningObj.slh
+        self.blh = binningObj.blh
+        self.xv = binningObj.xv
+        self.yv = binningObj.yv
         ### borders for comparing the old fakefaktors
 
         # if jfRS.meta["bkg"]=="QCD":
@@ -667,7 +671,7 @@ class fakefactor(object):
         # #elif jfRS.meta["bkg"]=="W+jets": self.binborders=np.array([29,32.5,36,42,65,500], np.float32)
         # else: raise Exception
 
-        #self.applyCorrections()
+        # #self.applyCorrections()
         # self.yerror = self.calcyerror()
         # self.npars, self.pars = self.getFitPars()
         # ## number of standar ddeviations used for calculating the error bands
@@ -689,6 +693,20 @@ class fakefactor(object):
         # self.fitresy = self.fitfunction(self.xsc, *popt)
         # self.rooFitPercV = self.roofitError()
         # self.plotFF()
+
+    def calcyerror(self):
+        ### Error calculation
+        ## σ_y= abs(y)sqrt((∂_s y)^2*σ_s^2+(∂_b y)^2*σ_b^2+2(∂_s y)(∂_b y)σ_s^2*σ_b^2)
+        # y,s,b>0 y=s/b
+        # = y*sqrt((σ_s/s)^2+(σ_b/b)^2+σ_s*σ_b/(s*b))
+        # poisson error
+        # = y*sqrt(sqrt(1/s)^2+sqrt(1/b)^2-2*σ_sb/(s*b))
+        # = y*sqrt(sqrt(1/s)^2+sqrt(1/b)^2)
+        yerror = np.array([
+            self.yv[i] * np.sqrt(1 / self.slh[i] + 1 / self.blh[i])
+            for i in range(len(self.yv))
+        ])
+        return yerror
 
     def getFitPars(self):
         center = np.mean(self.binborders)
