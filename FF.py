@@ -184,7 +184,7 @@ relVarL = trainingVarL.union(ffVarL).union({"eventWeight"})
 
 
 # %%
-class jetFakeEstimation(object):
+class ParSpaceRegion(object):
     def __init__(self, eraName, channelName, bkgName):
         self.meta = {"era": eraName, "channel": channelName, "bkg": bkgName}
         self.era = eraD[eraName]
@@ -246,53 +246,53 @@ class jetFakeEstimation(object):
         if self.meta["bkg"] == "ttbar":
             self.createttbarRDF()
         self.createClosureRDF()
-        self.SR = jFRegion(self.channel,
-                           self.meta,
-                           self.RDF,
-                           signalLikeRegion=True,
-                           determinationRegion=False)
+        self.SR = ParSpaceCrop(self.channel,
+                               self.meta,
+                               self.RDF,
+                               signalLikeRegion=True,
+                               determinationRegion=False)
 
-        self.AR = jFRegion(self.channel,
-                           self.meta,
-                           self.RDF,
-                           signalLikeRegion=False,
-                           determinationRegion=False)
+        self.AR = ParSpaceCrop(self.channel,
+                               self.meta,
+                               self.RDF,
+                               signalLikeRegion=False,
+                               determinationRegion=False)
 
         ## Define the Background and Signal like Determination Region
         if self.meta["bkg"] != "ttbar":
-            self.DR_sl = jFRegion(self.channel,
-                                  self.meta,
-                                  self.RDF,
-                                  signalLikeRegion=True,
-                                  determinationRegion=True)
-            self.DR_bl = jFRegion(self.channel,
-                                  self.meta,
-                                  self.RDF,
-                                  signalLikeRegion=False,
-                                  determinationRegion=True)
+            self.DR_sl = ParSpaceCrop(self.channel,
+                                      self.meta,
+                                      self.RDF,
+                                      signalLikeRegion=True,
+                                      determinationRegion=True)
+            self.DR_bl = ParSpaceCrop(self.channel,
+                                      self.meta,
+                                      self.RDF,
+                                      signalLikeRegion=False,
+                                      determinationRegion=True)
         else:
-            self.DR_sl = jFRegion(self.channel,
-                                  self.meta,
-                                  self.ttbarRDF,
-                                  signalLikeRegion=True,
-                                  determinationRegion=True)
-            self.DR_bl = jFRegion(self.channel,
-                                  self.meta,
-                                  self.ttbarRDF,
-                                  signalLikeRegion=False,
-                                  determinationRegion=True)
+            self.DR_sl = ParSpaceCrop(self.channel,
+                                      self.meta,
+                                      self.ttbarRDF,
+                                      signalLikeRegion=True,
+                                      determinationRegion=True)
+            self.DR_bl = ParSpaceCrop(self.channel,
+                                      self.meta,
+                                      self.ttbarRDF,
+                                      signalLikeRegion=False,
+                                      determinationRegion=True)
 
         ## Define RDFs for the closure correction
-        self.Closure_sl = jFRegion(self.channel,
-                                   self.meta,
-                                   self.ClosureRDF,
-                                   signalLikeRegion=True,
-                                   determinationRegion=True)
-        self.Closure_bl = jFRegion(self.channel,
-                                   self.meta,
-                                   self.ClosureRDF,
-                                   signalLikeRegion=False,
-                                   determinationRegion=True)
+        self.Closure_sl = ParSpaceCrop(self.channel,
+                                       self.meta,
+                                       self.ClosureRDF,
+                                       signalLikeRegion=True,
+                                       determinationRegion=True)
+        self.Closure_bl = ParSpaceCrop(self.channel,
+                                       self.meta,
+                                       self.ClosureRDF,
+                                       signalLikeRegion=False,
+                                       determinationRegion=True)
 
     def createRDF(self):
         tree_path = self.channel.name + "_nominal/ntuple"
@@ -412,7 +412,7 @@ class jetFakeEstimation(object):
         self.ClosureVarL = list(self.ClosureRDF.GetColumnNames())
 
 
-class jFRegion(jetFakeEstimation):
+class ParSpaceCrop(ParSpaceRegion):
     def __init__(self, channel, meta, RDF, signalLikeRegion,
                  determinationRegion):
         self.channel = copy.deepcopy(channel)
@@ -472,9 +472,9 @@ def plotvar(jfE, var):
 
 # %%
 
-jfQCD = jetFakeEstimation("2016", "mt", "QCD")
-jfWjet = jetFakeEstimation("2016", "mt", "W+jets")
-jfttbar = jetFakeEstimation("2016", "mt", "ttbar")
+jfQCD = ParSpaceRegion("2016", "mt", "QCD")
+jfWjet = ParSpaceRegion("2016", "mt", "W+jets")
+jfttbar = ParSpaceRegion("2016", "mt", "ttbar")
 
 # %%
 lastvals = {}
@@ -488,7 +488,7 @@ class DynBins(object):
         ### histogram both regions in the generated bins
         ### use dynamic binning, from the bl region -> no 1/0 bins
         self.binbordersD = {
-            var: self.dynbins(self.blarr[var], self.blarr["eventWeight"])
+            var: self.dyn1dBins(self.blarr[var], self.blarr["eventWeight"])
             for var in predictionVars
         }
         self.blh, self.edges = np.histogramdd(
@@ -562,6 +562,7 @@ class DynBins(object):
         self.yv = np.array(
             map(lambda idx: self.slh[idx] / self.blh[idx], self.valididxs))
         self.plotyMat()
+
     def plotyMat(self):
         self.ymat = np.full(self.slh.shape, np.nan)
         for idx, y in zip(self.valididxs, self.yv):
@@ -571,27 +572,29 @@ class DynBins(object):
         plt.close()
         plt.cla()
         plt.clf()
-        fit, axes = plt.subplots(3,1)
+        fit, axes = plt.subplots(3, 1)
         plt.gcf().set_size_inches((6, 8))
 
-        g=sns.heatmap(self.ymat, ax=axes[0])
+        g = sns.heatmap(self.ymat, ax=axes[0])
+        g.set
         g.set_xticklabels(self.bincentersL[0].round(0))
         g.set_yticklabels(self.bincentersL[1].round(0))
-        g=sns.heatmap(self.slh, ax=axes[1])
+        g = sns.heatmap(self.slh, ax=axes[1])
         g.set_xticklabels(self.bincentersL[0].round(0))
         g.set_yticklabels(self.bincentersL[1].round(0))
-        g=sns.heatmap(self.blh, ax=axes[2])
+        g = sns.heatmap(self.blh, ax=axes[2])
         g.set_xticklabels(self.bincentersL[0].round(0))
         g.set_yticklabels(self.bincentersL[1].round(0))
-        plt.show
-
+        plt.xlabel(self.predictionVars[0])
+        plt.ylabel(self.predictionVars[1])
+        plt.show()
 
         # # x values for the fit
         # self.xsc = np.arange(
         #     self.binborders[0], self.binborders[-1] + 200,
         #     200. / np.abs(self.binborders[-1] - self.binborders[0]))
 
-    def dynbins(self, arr, weightsarr):
+    def dyn1dBins(self, arr, weightsarr):
         import numpy.lib.recfunctions as rfn
         # if weights == None:
         #     weightsarr = [np.random.uniform(0, .7) for i in range(len(arr))]
@@ -647,6 +650,7 @@ class DynBins(object):
         return (np.delete(arr, obj=idx, axis=ivar))
 
 
+# %%
 class fakefactor(object):
     def __init__(self, jfRS, filterstring, predictionVars):
         ## get the numpy arrays from the jfObject
@@ -664,6 +668,7 @@ class fakefactor(object):
         self.blh = binningObj.blh
         self.xv = binningObj.xv
         self.yv = binningObj.yv
+        self.valididxs = binningObj.valididxs
         ### borders for comparing the old fakefaktors
 
         # if jfRS.meta["bkg"]=="QCD":
@@ -672,7 +677,7 @@ class fakefactor(object):
         # else: raise Exception
 
         # #self.applyCorrections()
-        # self.yerror = self.calcyerror()
+        self.yerror = self.calcyerror()
         # self.npars, self.pars = self.getFitPars()
         # ## number of standar ddeviations used for calculating the error bands
         # self.nstd = 1
@@ -703,7 +708,8 @@ class fakefactor(object):
         # = y*sqrt(sqrt(1/s)^2+sqrt(1/b)^2-2*σ_sb/(s*b))
         # = y*sqrt(sqrt(1/s)^2+sqrt(1/b)^2)
         yerror = np.array([
-            self.yv[i] * np.sqrt(1 / self.slh[i] + 1 / self.blh[i])
+            self.yv[i] * np.sqrt(1 / self.slh[self.valididxs[i]] +
+                                 1 / self.blh[self.valididxs[i]])
             for i in range(len(self.yv))
         ])
         return yerror
@@ -860,25 +866,10 @@ class fakefactor(object):
     #     return np.array(xv),np.array(ff)
 
 
-class ClosureCorrection(fakefactor):
-    def __init__(self, ffObject):
-        ## get the numpy arrays from the jfObject
-        self.jfRS = ffObject.jfRS
-        self.filterstring = ffObject.filterstring
-        var = "m_vis"
-        self.var = var
-        self.meta = ffObject.meta
-        self.blarr = self.jfRS.Closure_bl.RDF.Filter(
-            self.filterstring).AsNumpy([var, "eventWeight"])
-        self.slarr = self.jfRS.Closure_sl.RDF.Filter(
-            self.filterstring).AsNumpy([var, "eventWeight"])
-        self.binborders = super(ClosureCorrection,
-                                self).dynbins(self.blarr[var])
-
-
 #%%
-a = fakefactor(jfQCD, "1==1", ["pt_2", "m_vis"])
-
+a = fakefactor(jfQCD, "njets==0", ["pt_2", "m_vis"])
+#a = fakefactor(jfWjet, "1==1", ["pt_2", "m_vis"])
+# %%
 # l=[]
 # for jf in [jfQCD,jfWjet]:
 #     for filter in ["njets==0","njets>0"]:
