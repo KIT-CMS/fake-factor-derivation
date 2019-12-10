@@ -64,6 +64,9 @@ class DynBins(object):
     def __init__(self, slarr, blarr, predictionVars):
         self.slarr = slarr
         self.blarr = blarr
+        print(len(self.slarr[predictionVars[0]]))
+        #print(len(self.blarr[predictionVars[0]]))
+
         self.predictionVars = predictionVars
         ### histogram both regions in the generated bins
         ### use dynamic binning, from the bl region -> no 1/0 bins
@@ -88,8 +91,6 @@ class DynBins(object):
             self.binbordersToCenters(self.binbordersD[var])
             for var in self.predictionVars
         ]
-        print(self.slh.sum())
-        print(self.blh.sum())
 
         ## currently, the merge of the 1d bins into a nbinning lev
         ## join bins  a var that do not have sufficient statistic due to the "multiplication" of the 1d binnings
@@ -132,7 +133,7 @@ class DynBins(object):
                 ibin -= 1
 
         print(self.slh.sum())
-        print(self.blh.sum())
+        #print(self.blh.sum())
         ## filter indices of bins with less than 10 events
         ## generate a list of index tuples for slh, blh
         self.idxs = list(np.ndindex(*self.slh.shape))
@@ -179,23 +180,22 @@ class DynBins(object):
 
     def dyn1dBins(self, arr, weightsarr):
         import numpy.lib.recfunctions as rfn
-        # if weights == None:
-        #     weightsarr = [np.random.uniform(0, .7) for i in range(len(arr))]
-        #     weightsarr = [1 for i in range(len(arr))]
         varS = rfn.merge_arrays([arr, weightsarr])
-        #print varS
+        #sort the values first
         varS.sort(order="f0")
 
         marker = len(varS) - 1
         markerval = varS["f0"][marker]
         stdbinwith = 10
+        # we start from the maximium so it is out first binborder
         binborders = [varS["f0"][-1]]
         varmin = varS["f0"][0]
 
+        ##
         while (0 != marker):
             curbinsum = 0
             #make sure the sum of the event weights in the bin is at least 100
-            while (curbinsum < 100):
+            while (curbinsum < 100 and marker>0):
                 #add the weight of the current event
                 curbinsum += varS["f1"][marker]
                 marker -= 1
