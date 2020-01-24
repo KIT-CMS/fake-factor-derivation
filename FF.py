@@ -283,16 +283,16 @@ class fakefactor(object):
         # self.plotFF()
 
     def calcyerror(self):
-        ### Error calculation
-        ## σ_y= abs(y)sqrt((∂_s y)^2*σ_s^2+(∂_b y)^2*σ_b^2+2(∂_s y)(∂_b y)σ_s^2*σ_b^2)
+        ### Error calculation y=s/b
+        ## σ_y= y^2*[(∂_s y)^2*σ_s^2+(∂_b y)^2*σ_b^2+2*σ_sb^2*(∂_s y)(∂_b y)]
         # y,s,b>0 y=s/b
-        # = y*sqrt((σ_s/s)^2+(σ_b/b)^2+σ_s*σ_b/(s*b))
-        # poisson error
-        # = y*sqrt(sqrt(1/s)^2+sqrt(1/b)^2-2*σ_sb/(s*b))
-        # = y*sqrt(sqrt(1/s)^2+sqrt(1/b)^2)
+        # σ_y^2= y^2*((σ_s/s)^2+(-σ_b*s/b^2)^2+2*σ_sb*(1/b)*(-1/b^2))
+        # =  y^2*(σ_s^2*b^2+σ_b^2*s-2*σ_sb*b)/b^4
+        # poisson error σ_a^2=A σ_b^2=B
+        # = A(1/B^2+A/B^3)
+        def formula(a,b): return(a*(1/b**2+a/b**3))
         yerror = np.array([
-            self.yv[i] * np.sqrt(1 / self.slh[self.valididxs[i]] +
-                                 1 / self.blh[self.valididxs[i]])
+            formula(self.slh[self.valididxs[i]],self.blh[self.valididxs[i]])
             for i in range(len(self.yv))
         ])
         return yerror
